@@ -1,0 +1,16 @@
+# Sign Language Dataset Management — Python dependencies
+# Install with:  pip install -r requirements.txt
+
+opencv-python>=4.8.0
+numpy>=1.24.0
+mediapipe==0.10.14   # pinned to 0.10.14 for stable solutions.hands API
+Pillow>=10.0.0         # used by future training pipeline
+tqdm>=4.66.0           # progress bars for future training
+scikit-learn>=1.3.0    # needed for Random Forest & metrics
+torch>=2.0.0           # PyTorch for CNN model training
+torchvision>=0.15.0    # image transforms & datasets
+matplotlib>=3.7.0      # confusion matrix and loss curve plots
+seaborn>=0.12.0        # enhanced confusion matrix visualization
+SpeechRecognition>=3.10.0 # Stage 5: Microphone speech recognition
+PyAudio>=0.2.14        # Stage 5: Audio stream recording
+pyttsx3>=2.90          # Text-to-speech engine

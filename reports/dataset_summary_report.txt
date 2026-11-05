@@ -1,0 +1,81 @@
+==========================================================================================
+ SIGN LANGUAGE DATASET — SUMMARY REPORT
+ Generated : 2026-10-30 14:04:12
+==========================================================================================
+
+OVERALL STATISTICS
+--------------------------------------------------
+  Total alphabets with data : 3 / 26
+  Total images (raw)        : 20
+  Total valid images        : 20
+  Total corrupted           : 0
+  Total duplicates          : 0
+
+PER-ALPHABET BREAKDOWN
+------------------------------------------------------------------------------------------
+#   Letter    Datasets     Total     Valid   Corrupt    Dups  Status                             Validation
+------------------------------------------------------------------------------------------
+1   A                2         9         9         0       0  🔴 CRITICAL                         Clean
+2   B                2         6         6         0       0  🔴 CRITICAL                         Clean
+3   C                3         5         5         0       0  🔴 CRITICAL                         Clean
+4   D                0         0         0         0       0  ⬜ EMPTY                            Clean
+5   E                0         0         0         0       0  ⬜ EMPTY                            Clean
+6   F                0         0         0         0       0  ⬜ EMPTY                            Clean
+7   G                0         0         0         0       0  ⬜ EMPTY                            Clean
+8   H                0         0         0         0       0  ⬜ EMPTY                            Clean
+9   I                0         0         0         0       0  ⬜ EMPTY                            Clean
+10  J                0         0         0         0       0  ⬜ EMPTY                            Clean
+11  K                0         0         0         0       0  ⬜ EMPTY                            Clean
+12  L                0         0         0         0       0  ⬜ EMPTY                            Clean
+13  M                0         0         0         0       0  ⬜ EMPTY                            Clean
+14  N                0         0         0         0       0  ⬜ EMPTY                            Clean
+15  O                0         0         0         0       0  ⬜ EMPTY                            Clean
+16  P                0         0         0         0       0  ⬜ EMPTY                            Clean
+17  Q                0         0         0         0       0  ⬜ EMPTY                            Clean
+18  R                0         0         0         0       0  ⬜ EMPTY                            Clean
+19  S                0         0         0         0       0  ⬜ EMPTY                            Clean
+20  T                0         0         0         0       0  ⬜ EMPTY                            Clean
+21  U                0         0         0         0       0  ⬜ EMPTY                            Clean
+22  V                0         0         0         0       0  ⬜ EMPTY                            Clean
+23  W                0         0         0         0       0  ⬜ EMPTY                            Clean
+24  X                0         0         0         0       0  ⬜ EMPTY                            Clean
+25  Y                0         0         0         0       0  ⬜ EMPTY                            Clean
+26  Z                0         0         0         0       0  ⬜ EMPTY                            Clean
+------------------------------------------------------------------------------------------
+
+ALPHABETS NEEDING ATTENTION
+--------------------------------------------------
+  ⬜  D — EMPTY — add images to dataset/D/dataset_1/
+  ⬜  E — EMPTY — add images to dataset/E/dataset_1/
+  ⬜  F — EMPTY — add images to dataset/F/dataset_1/
+  ⬜  G — EMPTY — add images to dataset/G/dataset_1/
+  ⬜  H — EMPTY — add images to dataset/H/dataset_1/
+  ⬜  I — EMPTY — add images to dataset/I/dataset_1/
+  ⬜  J — EMPTY — add images to dataset/J/dataset_1/
+  ⬜  K — EMPTY — add images to dataset/K/dataset_1/
+  ⬜  L — EMPTY — add images to dataset/L/dataset_1/
+  ⬜  M — EMPTY — add images to dataset/M/dataset_1/
+  ⬜  N — EMPTY — add images to dataset/N/dataset_1/
+  ⬜  O — EMPTY — add images to dataset/O/dataset_1/
+  ⬜  P — EMPTY — add images to dataset/P/dataset_1/
+  ⬜  Q — EMPTY — add images to dataset/Q/dataset_1/
+  ⬜  R — EMPTY — add images to dataset/R/dataset_1/
+  ⬜  S — EMPTY — add images to dataset/S/dataset_1/
+  ⬜  T — EMPTY — add images to dataset/T/dataset_1/
+  ⬜  U — EMPTY — add images to dataset/U/dataset_1/
+  ⬜  V — EMPTY — add images to dataset/V/dataset_1/
+  ⬜  W — EMPTY — add images to dataset/W/dataset_1/
+  ⬜  X — EMPTY — add images to dataset/X/dataset_1/
+  ⬜  Y — EMPTY — add images to dataset/Y/dataset_1/
+  ⬜  Z — EMPTY — add images to dataset/Z/dataset_1/
+  🔴  A — CRITICAL — only 9 valid image(s)
+  🔴  B — CRITICAL — only 6 valid image(s)
+  🔴  C — CRITICAL — only 5 valid image(s)
+
+VALIDATION ISSUES (first 20)
+--------------------------------------------------
+  No validation issues found. ✅
+
+==========================================================================================
+END OF REPORT
+==========================================================================================

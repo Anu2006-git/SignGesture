@@ -1,0 +1,158 @@
+{
+  "config": {
+    "videos_dir": "videos",
+    "alphabet_dir": "alphabet",
+    "allow_fingerspelling_fallback": true,
+    "playback_fps": 25,
+    "letter_hold_sec": 1.0
+  },
+  "vocabulary": {
+    "hello": {
+      "video": "hello.mp4",
+      "label": "HELLO",
+      "category": "greeting",
+      "verified": true,
+      "description": "Open hand with fingers together moves outward from temple/forehead in a salute-like motion."
+    },
+    "hi": {
+      "video": "hello.mp4",
+      "label": "HELLO",
+      "category": "greeting",
+      "verified": true,
+      "description": "Synonym mapping to HELLO."
+    },
+    "hey": {
+      "video": "hello.mp4",
+      "label": "HELLO",
+      "category": "greeting",
+      "verified": true,
+      "description": "Synonym mapping to HELLO."
+    },
+    "thank you": {
+      "video": "thank_you.mp4",
+      "label": "THANK YOU",
+      "category": "courtesy",
+      "verified": true,
+      "description": "Fingertips of dominant flat hand touch chin and move forward towards the person."
+    },
+    "thanks": {
+      "video": "thank_you.mp4",
+      "label": "THANK YOU",
+      "category": "courtesy",
+      "verified": true,
+      "description": "Synonym mapping to THANK YOU."
+    },
+    "please": {
+      "video": "please.mp4",
+      "label": "PLEASE",
+      "category": "courtesy",
+      "verified": true,
+      "description": "Open flat hand rubs chest in a clockwise circular motion."
+    },
+    "welcome": {
+      "video": "welcome.mp4",
+      "label": "WELCOME",
+      "category": "greeting",
+      "verified": true,
+      "description": "Open hand sweeps inward towards body in an inviting gesture."
+    },
+    "yes": {
+      "video": "yes.mp4",
+      "label": "YES",
+      "category": "response",
+      "verified": true,
+      "description": "Fist (S hand) nods up and down from the wrist like a nodding head."
+    },
+    "yeah": {
+      "video": "yes.mp4",
+      "label": "YES",
+      "category": "response",
+      "verified": true,
+      "description": "Synonym mapping to YES."
+    },
+    "no": {
+      "video": "no.mp4",
+      "label": "NO",
+      "category": "response",
+      "verified": true,
+      "description": "Index and middle fingers tap against thumb like a closing beak."
+    },
+    "help": {
+      "video": "help.mp4",
+      "label": "HELP",
+      "category": "action",
+      "verified": true,
+      "description": "Closed fist with thumb up rests on open flat palm, and both hands lift together."
+    },
+    "good": {
+      "video": "good.mp4",
+      "label": "GOOD",
+      "category": "descriptor",
+      "verified": true,
+      "description": "Fingertips touch lips, then hand moves down to rest on flat palm of other hand."
+    },
+    "morning": {
+      "video": "morning.mp4",
+      "label": "MORNING",
+      "category": "time",
+      "verified": true,
+      "description": "Dominant arm rises like the sun over the horizon formed by the non-dominant arm."
+    },
+    "good morning": {
+      "video": "good_morning.mp4",
+      "label": "GOOD MORNING",
+      "category": "greeting",
+      "verified": true,
+      "description": "Compound sign: GOOD followed by MORNING."
+    },
+    "how are you": {
+      "video": "how_are_you.mp4",
+      "label": "HOW ARE YOU",
+      "category": "greeting",
+      "verified": true,
+      "description": "Curved hands rotate outward followed by pointing forward."
+    },
+    "sign": {
+      "video": "sign.mp4",
+      "label": "SIGN",
+      "category": "concept",
+      "verified": true,
+      "description": "Index fingers revolve around each other in alternating backward circles."
+    },
+    "friend": {
+      "video": "friend.mp4",
+      "label": "FRIEND",
+      "category": "people",
+      "verified": true,
+      "description": "Index fingers hook together, then flip and hook the opposite way."
+    },
+    "goodbye": {
+      "video": "goodbye.mp4",
+      "label": "GOODBYE",
+      "category": "greeting",
+      "verified": true,
+      "description": "Open hand with fingers together waves forward and back."
+    },
+    "bye": {
+      "video": "goodbye.mp4",
+      "label": "GOODBYE",
+      "category": "greeting",
+      "verified": true,
+      "description": "Synonym mapping to GOODBYE."
+    },
+    "name": {
+      "video": "name.mp4",
+      "label": "NAME",
+      "category": "concept",
+      "verified": true,
+      "description": "Index and middle fingers of both hands form H shapes and tap twice crosswise."
+    },
+    "quantum": {
+      "video": "non_existent_video_12345.mp4",
+      "label": "QUANTUM",
+      "category": "general",
+      "verified": true,
+      "description": ""
+    }
+  }
+}

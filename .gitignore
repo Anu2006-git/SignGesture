@@ -1,0 +1,55 @@
+# ==============================================================================
+# SignGesture .gitignore
+# ==============================================================================
+
+# --- Datasets & Heavy Data (Excluded from Git) ---
+dataset/
+processed_dataset/
+*.zip
+*.tar.gz
+*.h5
+*.hdf5
+*.pkl
+
+# --- Cache and Intermediate Model Feature Caches ---
+models/cache_*.joblib
+.cache/
+*.cache
+
+# --- Python Bytecode & Optimization ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+
+# --- Test & Coverage Caches ---
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Logs & Runtime Artifacts ---
+logs/
+*.log
+
+# --- Virtual Environments ---
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# --- IDE & Editor Settings ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+
+# --- OS Generated Files ---
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini

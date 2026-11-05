@@ -1,0 +1,46 @@
+{
+  "timestamp": "2026-11-05 23:52:56",
+  "comparison": {
+    "winner_name": "Landmark Random Forest",
+    "winner_type": "RandomForest",
+    "reason": "Only Random Forest model was trained."
+  },
+  "models": {
+    "random_forest": {
+      "test_samples": 730,
+      "accuracy": 0.9972602739726028,
+      "precision_macro": 0.997477253928867,
+      "recall_macro": 0.9972018722018722,
+      "f1_macro": 0.9972926023894059,
+      "f1_weighted": 0.9972577348304487,
+      "per_class_f1": {
+        "A": 1.0,
+        "B": 1.0,
+        "C": 1.0,
+        "D": 1.0,
+        "E": 1.0,
+        "F": 1.0,
+        "G": 1.0,
+        "H": 1.0,
+        "I": 1.0,
+        "J": 1.0,
+        "K": 0.9818181818181818,
+        "L": 1.0,
+        "M": 1.0,
+        "N": 1.0,
+        "O": 1.0,
+        "P": 1.0,
+        "Q": 1.0,
+        "R": 1.0,
+        "S": 0.9830508474576272,
+        "T": 1.0,
+        "U": 0.9836065573770492,
+        "V": 1.0,
+        "W": 1.0,
+        "X": 0.9811320754716981,
+        "Y": 1.0,
+        "Z": 1.0
+      }
+    }
+  }
+}
