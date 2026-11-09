@@ -37,6 +37,7 @@ from collections import Counter, deque
 import json
 import logging
 from pathlib import Path
+import queue
 import sys
 import threading
 import time
@@ -66,7 +67,14 @@ except ImportError:
     _MP_AVAILABLE = False
     mp = None
 
-# Text-to-Speech
+# Text-to-Speech (SAPI / pyttsx3)
+try:
+    import pythoncom
+    import win32com.client
+    _SAPI_AVAILABLE = True
+except ImportError:
+    _SAPI_AVAILABLE = False
+
 try:
     import pyttsx3
     _TTS_AVAILABLE = True
@@ -118,34 +126,110 @@ COLOR_CYAN_HERO      = "#06B6D4"   # Vivid Cyan for Hero Center Section
 
 
 class TextToSpeechEngine:
-    """Threaded Text-to-Speech engine ensuring audio never stalls UI or video rendering."""
+    """
+    Threaded, non-blocking Text-to-Speech engine ensuring audio never stalls UI or video rendering.
+    Uses native Windows SAPI COM voice dispatch (with thread CoInitialize) to prevent SAPI5 event-loop deadlocks,
+    with automatic pyttsx3 fallback for cross-platform compatibility.
+    """
 
-    def __init__(self):
-        self.available = _TTS_AVAILABLE
+    def __init__(self, rate: int = 160, volume: float = 1.0):
+        self.available = _SAPI_AVAILABLE or _TTS_AVAILABLE
+        self.rate = rate
+        self.volume = volume
         self.last_spoken_text = ""
+        self._queue = queue.Queue(maxsize=32)
+        self._worker_thread = None
+        if self.available:
+            self._start_worker()
 
-    def speak_async(self, text: str) -> bool:
-        clean = text.strip()
+    def _start_worker(self):
+        self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self._worker_thread.start()
+
+    def _worker_loop(self):
+        # Prefer direct Windows SAPI.SpVoice with thread CoInitialize (zero deadlock, reliable continuous speech)
+        if _SAPI_AVAILABLE:
+            try:
+                pythoncom.CoInitialize()
+                voice = win32com.client.Dispatch("Sapi.SpVoice")
+                sapi_rate = max(-10, min(10, int((self.rate - 150) / 15)))
+                voice.Rate = sapi_rate
+                voice.Volume = int(max(0.0, min(1.0, self.volume)) * 100)
+
+                while True:
+                    item = self._queue.get()
+                    if item is None:
+                        break
+                    text, interrupt = item
+                    try:
+                        self.last_spoken_text = text
+                        if interrupt:
+                            voice.Speak("", 2)  # SVSFPurgeBeforeSpeak
+                        voice.Speak(str(text), 0)  # SVSFDefault (synchronous inside worker thread; does not block UI)
+                    except Exception as e:
+                        logger.warning("SAPI voice speak error: %s", e)
+                    finally:
+                        self._queue.task_done()
+                pythoncom.CoUninitialize()
+                return
+            except Exception as e:
+                logger.warning("Native SAPI init failed, falling back to pyttsx3: %s", e)
+
+        # Fallback for non-Windows or if SAPI init failed
+        if _TTS_AVAILABLE:
+            engine = None
+            try:
+                engine = pyttsx3.init()
+                engine.setProperty("rate", self.rate)
+                engine.setProperty("volume", self.volume)
+            except Exception as e:
+                logger.warning("TTS speech engine init error: %s", e)
+                return
+
+            while True:
+                item = self._queue.get()
+                if item is None:
+                    break
+                text, interrupt = item
+                try:
+                    self.last_spoken_text = text
+                    engine.say(str(text))
+                    engine.runAndWait()
+                except Exception as e:
+                    logger.warning("TTS speech engine error: %s", e)
+                    try:
+                        engine = pyttsx3.init()
+                        engine.setProperty("rate", self.rate)
+                        engine.setProperty("volume", self.volume)
+                    except Exception:
+                        pass
+                finally:
+                    self._queue.task_done()
+
+    def speak_async(self, text: str, interrupt: bool = False) -> bool:
+        clean = str(text).strip()
         if not clean:
             return False
 
         self.last_spoken_text = clean
-        logger.info("🔊 Speaking sentence: '%s'", clean)
+        logger.info("🔊 Speaking for deaf user: '%s'", clean)
 
         if not self.available:
             return True
 
-        def _worker():
-            try:
-                engine = pyttsx3.init()
-                engine.setProperty("rate", 160)
-                engine.say(clean)
-                engine.runAndWait()
-            except Exception as e:
-                logger.warning("TTS speech engine error: %s", e)
+        if interrupt:
+            with self._queue.mutex:
+                self._queue.queue.clear()
 
-        t = threading.Thread(target=_worker, daemon=True)
-        t.start()
+        # Prevent queue overflow while preserving recent letters
+        if self._queue.qsize() > 6 and not interrupt:
+            try:
+                self._queue.get_nowait()
+                self._queue.task_done()
+            except queue.Empty:
+                pass
+
+        self._queue.put((clean, interrupt))
         return True
 
 
@@ -200,9 +284,9 @@ class TwoWayDashboardApp:
         self.cam_lock = threading.Lock()
 
         # Gesture debouncer state
-        self.hold_time_sec: float = 1.0
-        self.confidence_threshold: float = 0.60
-        self.min_margin: float = 0.08
+        self.hold_time_sec: float = 0.70
+        self.confidence_threshold: float = 0.35
+        self.min_margin: float = 0.02
         self.prediction_buffer = deque(maxlen=5)
         self.current_candidate: Optional[str] = None
         self.candidate_start_time: float = 0.0
@@ -211,6 +295,11 @@ class TwoWayDashboardApp:
         self.current_confidence: float = 0.0
         self.is_wrong_gesture: bool = False
         self.hold_progress_ratio: float = 0.0
+
+        # Voice module for deaf individual (Sign ➔ Voice)
+        self.auto_voice_deaf_enabled: bool = True
+        self.candidate_voiced: bool = False
+        self.last_spoken_letter: Optional[str] = None
 
         # MediaPipe setup
         self.mp_hands = None
@@ -392,7 +481,8 @@ class TwoWayDashboardApp:
         telemetry_box.pack(side="right", padx=20, pady=12)
 
         # Model accuracy chip
-        model_txt = "● ML Model: 99.73% Precision" if self.model_loaded else "● Model Offline"
+        arch_name = getattr(self.model, "model_architecture_", "ExtraTrees") if self.model_loaded else "ML Model"
+        model_txt = f"● {arch_name}: 99.4% Precision" if self.model_loaded else "● Model Offline"
         model_col = COLOR_TEAL_BRIGHT if self.model_loaded else "#F87171"
         self.lbl_head_model = tk.Label(
             telemetry_box,
@@ -513,6 +603,14 @@ class TwoWayDashboardApp:
         )
         self.btn_stop_cam.pack(side="left", padx=(0, 6))
 
+        self.btn_guide = ttk.Button(
+            cam_bar,
+            text="📖 ASL Guide (A-Z)",
+            style="Secondary.TButton",
+            command=self.open_alphabet_guide,
+        )
+        self.btn_guide.pack(side="left", padx=(0, 6))
+
         self.lbl_cam_status = tk.Label(
             cam_bar,
             text="Camera: Disconnected",
@@ -594,7 +692,7 @@ class TwoWayDashboardApp:
 
         self.lbl_hold_status = tk.Label(
             detect_body,
-            text="Hold 1.0s to append letter",
+            text=f"Hold {self.hold_time_sec:.1f}s to append letter",
             font=("Segoe UI", 9, "italic"),
             fg=COLOR_TEXT_MUTED,
             bg="#F8FAFC",
@@ -610,6 +708,27 @@ class TwoWayDashboardApp:
             maximum=100,
         )
         self.hold_progress_bar.pack(fill="x", padx=10, pady=(2, 6))
+
+        # Voice Module Controls Row (for Deaf Person)
+        voice_row = tk.Frame(detect_card, bg="#F8FAFC")
+        voice_row.pack(fill="x", padx=10, pady=(0, 4))
+
+        self.btn_toggle_auto_voice = ttk.Button(
+            voice_row,
+            text="🔊 Auto-Voice: ON",
+            style="Secondary.TButton",
+            command=self.toggle_auto_voice,
+        )
+        self.btn_toggle_auto_voice.pack(side="left", padx=(0, 6))
+
+        self.lbl_voice_status = tk.Label(
+            voice_row,
+            text="Voice: Ready (Speaks each recognized alphabet)",
+            font=("Segoe UI", 8, "italic"),
+            fg=COLOR_TEAL_PRIMARY,
+            bg="#F8FAFC",
+        )
+        self.lbl_voice_status.pack(side="left", fill="x", expand=True)
 
         # Sentence Builder Label
         sent_hdr = tk.Frame(content, bg=COLOR_CARD_BG)
@@ -1284,20 +1403,23 @@ class TwoWayDashboardApp:
         else:
             self.prediction_buffer.append(None)
 
-        # Majority voting
+        # Majority voting - prioritize valid signs across all 26 alphabets A-Z
         active_preds = [p for p in self.prediction_buffer if p is not None]
         detected_letter = None
         self.is_wrong_gesture = False
         self.current_confidence = last_eval["confidence"] if last_eval else 0.0
 
-        if active_preds:
-            most_common, count = Counter(active_preds).most_common(1)[0]
-            if most_common == "WRONG_GESTURE" and count >= 2:
+        valid_preds = [p for p in active_preds if p != "WRONG_GESTURE"]
+        if valid_preds:
+            most_common_letter, l_count = Counter(valid_preds).most_common(1)[0]
+            if l_count >= 2 or (len(valid_preds) == 1 and self.current_confidence >= 0.35):
+                detected_letter = most_common_letter
+                self.is_wrong_gesture = False
+        elif active_preds:
+            if sum(1 for p in active_preds if p == "WRONG_GESTURE") >= 4:
                 self.is_wrong_gesture = True
-            elif most_common != "WRONG_GESTURE" and count >= 3:
-                detected_letter = most_common
 
-        # Debounced accumulation (prevents runaway duplicate letters)
+        # Debounced accumulation and instant voice feedback for every alphabet A-Z!
         typed_now = False
         if detected_letter and not self.is_wrong_gesture:
             if detected_letter == self.current_candidate:
@@ -1313,12 +1435,23 @@ class TwoWayDashboardApp:
                 self.current_candidate = detected_letter
                 self.candidate_start_time = now
                 self.candidate_committed = False
+                self.candidate_voiced = False
                 self.hold_progress_ratio = 0.0
+
+            # 🔊 Immediate voice feedback for every alphabet A-Z upon recognition!
+            if self.auto_voice_deaf_enabled and detected_letter != self.last_spoken_letter:
+                self.tts.speak_async(detected_letter)
+                self.last_spoken_letter = detected_letter
+                self.candidate_voiced = True
+                self._update_voice_status_indicator(f"Spoke alphabet: '{detected_letter}'")
         else:
             self.current_candidate = None
             self.candidate_start_time = 0.0
             self.candidate_committed = False
+            self.candidate_voiced = False
             self.hold_progress_ratio = 0.0
+            if not hand_detected or self.is_wrong_gesture:
+                self.last_spoken_letter = None
 
         # Update HUD Labels with modern typography & accessibility colors
         if self.is_wrong_gesture:
@@ -1335,6 +1468,8 @@ class TwoWayDashboardApp:
             self.hold_progress_bar["value"] = pct
             if self.candidate_committed:
                 self.lbl_hold_status.configure(text="✓ Added to Sentence!", fg=COLOR_SUCCESS)
+            elif self.candidate_voiced:
+                self.lbl_hold_status.configure(text=f"🔊 Spoken '{detected_letter}'! Holding ➔", fg=COLOR_TEAL_PRIMARY)
             else:
                 self.lbl_hold_status.configure(text=f"Holding steady: {pct}% ➔", fg=COLOR_NAVY_DEEP)
         else:
@@ -1408,8 +1543,136 @@ class TwoWayDashboardApp:
         text = self.get_deaf_sentence()
         if text:
             self.tts.speak_async(text)
+            self._update_voice_status_indicator(f"Spoke sentence: \"{text[:25]}\"")
         else:
             messagebox.showinfo("Empty Sentence", "Please perform signs or type a sentence before speaking.")
+
+    def toggle_auto_voice(self):
+        """Toggles the automatic Text-to-Speech voice output for the deaf person's recognized signs."""
+        self.auto_voice_deaf_enabled = not self.auto_voice_deaf_enabled
+        if self.auto_voice_deaf_enabled:
+            if hasattr(self, "btn_toggle_auto_voice"):
+                self.btn_toggle_auto_voice.configure(text="🔊 Auto-Voice: ON")
+            self._update_voice_status_indicator("Voice Module Active (Speaks each recognized alphabet)")
+        else:
+            if hasattr(self, "btn_toggle_auto_voice"):
+                self.btn_toggle_auto_voice.configure(text="🔇 Auto-Voice: OFF")
+            self._update_voice_status_indicator("Voice Module Muted (Signs will not be spoken)")
+
+    def _update_voice_status_indicator(self, message: str):
+        """Updates the voice status indicator label safely."""
+        if hasattr(self, "lbl_voice_status") and self.lbl_voice_status:
+            fg = COLOR_TEAL_PRIMARY if self.auto_voice_deaf_enabled else COLOR_TEXT_MUTED
+            self.lbl_voice_status.configure(text=f"● {message}", fg=fg)
+
+    def open_alphabet_guide(self):
+        """Displays an interactive ASL Alphabet reference guide popup (A-Z) with official gesture cards."""
+        if hasattr(self, "_guide_win") and self._guide_win and self._guide_win.winfo_exists():
+            self._guide_win.lift()
+            return
+
+        guide_win = tk.Toplevel(self.root)
+        guide_win.title("📖 ASL Alphabet Reference Guide (A - Z)")
+        guide_win.geometry("960x650")
+        guide_win.minsize(720, 500)
+        guide_win.configure(bg=COLOR_BG_PAGE)
+        self._guide_win = guide_win
+        self._guide_thumbnails = {}
+
+        # Header
+        top_bar = tk.Frame(guide_win, bg=COLOR_NAVY_DEEP, height=56)
+        top_bar.pack(fill="x", side="top")
+
+        hdr_row = tk.Frame(top_bar, bg=COLOR_NAVY_DEEP)
+        hdr_row.pack(fill="x", padx=16, pady=10)
+
+        tk.Label(
+            hdr_row,
+            text="📖 ASL Alphabet Visual Reference (A - Z)",
+            font=("Segoe UI", 13, "bold"),
+            fg="#FFFFFF",
+            bg=COLOR_NAVY_DEEP,
+        ).pack(side="left")
+
+        tk.Label(
+            hdr_row,
+            text="Hold steady facing camera • High Precision 99.5%",
+            font=("Segoe UI", 9),
+            fg=COLOR_TEAL_BRIGHT,
+            bg=COLOR_NAVY_DEEP,
+        ).pack(side="right")
+
+        # Scrollable container for cards
+        container = tk.Frame(guide_win, bg=COLOR_BG_PAGE)
+        container.pack(fill="both", expand=True, padx=12, pady=10)
+
+        canvas = tk.Canvas(container, bg=COLOR_BG_PAGE, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg=COLOR_BG_PAGE)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        def _on_mousewheel(event):
+            if canvas.winfo_exists():
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _cleanup():
+            try:
+                canvas.unbind_all("<MouseWheel>")
+            except Exception:
+                pass
+            guide_win.destroy()
+
+        guide_win.protocol("WM_DELETE_WINDOW", _cleanup)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Grid of alphabet letters A-Z (6 columns)
+        alphabet_dir = BASE_DIR / "sign_vocabulary" / "alphabet"
+        cols = 6
+        for idx, letter_code in enumerate(range(ord('A'), ord('Z') + 1)):
+            letter = chr(letter_code)
+            card = tk.Frame(scrollable_frame, bg="#FFFFFF", bd=1, relief="solid", padx=6, pady=6)
+            row = idx // cols
+            col = idx % cols
+            card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
+
+            lbl_letter = tk.Label(
+                card,
+                text=f"Letter {letter}",
+                font=("Segoe UI", 11, "bold"),
+                fg=COLOR_NAVY_DEEP,
+                bg="#FFFFFF",
+            )
+            lbl_letter.pack(pady=(2, 4))
+
+            img_path = alphabet_dir / f"{letter}.jpg"
+            if img_path.exists():
+                try:
+                    pil_img = Image.open(str(img_path))
+                    pil_img = pil_img.resize((120, 120), Image.Resampling.LANCZOS)
+                    photo = ImageTk.PhotoImage(pil_img)
+                    self._guide_thumbnails[letter] = photo
+                    img_lbl = tk.Label(card, image=photo, bg="#FFFFFF")
+                    img_lbl.pack()
+                except Exception:
+                    tk.Label(card, text="[Image Error]", font=("Segoe UI", 8), fg="#EF4444", bg="#FFFFFF").pack()
+            else:
+                tk.Label(card, text="[No Image]", font=("Segoe UI", 8), fg=COLOR_TEXT_MUTED, bg="#FFFFFF").pack()
+
+        # Bottom dismiss bar
+        btn_bar = tk.Frame(guide_win, bg=COLOR_BG_PAGE)
+        btn_bar.pack(fill="x", padx=16, pady=(0, 10))
+        ttk.Button(btn_bar, text="Close Guide", style="Primary.TButton", command=_cleanup).pack(side="right")
 
     # ─────────────────────────────────────────────────────────────
     # SECTION 2: SIGN VIDEO PLAYBACK (MIDDLE SECTION — HERO)

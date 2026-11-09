@@ -120,8 +120,8 @@ def evaluate_gesture(
     model: Any,
     class_stats: Optional[Dict[int, Dict[str, Any]]],
     classes: List[str],
-    confidence_threshold: float = 0.60,
-    min_margin: float = 0.10,
+    confidence_threshold: float = 0.35,
+    min_margin: float = 0.03,
 ) -> Dict[str, Any]:
     """
     Evaluates an 88-D feature vector against the trained model and class statistics
@@ -168,9 +168,9 @@ def evaluate_gesture(
     elif margin < min_margin:
         is_matched = False
         reason = f"Ambiguous gesture (Margin {margin * 100:.1f}% < {min_margin * 100:.0f}%)"
-    elif class_stats and dist > threshold_dist * 1.35:
+    elif class_stats and dist > threshold_dist * 3.5 and confidence < 0.60:
         is_matched = False
-        reason = f"Outlier shape (Distance {dist:.2f} > threshold {threshold_dist * 1.35:.2f})"
+        reason = f"Outlier shape (Distance {dist:.2f} > threshold {threshold_dist * 3.5:.2f})"
 
     return {
         "pred_letter": candidate_letter if is_matched else None,

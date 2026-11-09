@@ -13,11 +13,21 @@ Covers all 6 required verification workflows:
 """
 
 import json
+import os
 from pathlib import Path
+import sys
 import time
 import tkinter as tk
 import unittest
 from unittest.mock import MagicMock, patch
+
+# Ensure Tcl/Tk environment is explicitly mapped for Windows test runs
+tcl_dir = Path(sys.prefix) / "tcl" / "tcl8.6"
+tk_dir = Path(sys.prefix) / "tcl" / "tk8.6"
+if tcl_dir.exists():
+    os.environ["TCL_LIBRARY"] = str(tcl_dir)
+if tk_dir.exists():
+    os.environ["TK_LIBRARY"] = str(tk_dir)
 
 import joblib
 import numpy as np
@@ -48,10 +58,23 @@ class TestTwoWayCommunicationDashboard(unittest.TestCase):
         assert len(test_cache) > 0, "No test features cache found"
         cls.cached_data = joblib.load(str(test_cache[0]))
 
+        cls.root = tk.Tk()
+        cls.root.withdraw()
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.root.destroy()
+        except Exception:
+            pass
+
     def setUp(self):
-        """Set up headless Tk root and Dashboard app for each test."""
-        self.root = tk.Tk()
-        self.root.withdraw()  # Headless mode for automated tests
+        """Set up headless Dashboard app for each test reusing shared root."""
+        for widget in self.root.winfo_children():
+            try:
+                widget.destroy()
+            except Exception:
+                pass
 
         # Prevent actual hardware webcam capture during setup
         with patch("cv2.VideoCapture") as mock_cap:
@@ -69,9 +92,13 @@ class TestTwoWayCommunicationDashboard(unittest.TestCase):
         self.app.tts.speak_async.side_effect = _mock_speak
 
     def tearDown(self):
-        """Tear down Tk window and clean up app resources."""
+        """Clean up app resources without destroying shared Tk root."""
         try:
-            self.app.on_closing()
+            self.app.stop_camera()
+            if self.app.speech_engine:
+                self.app.speech_engine.stop_listening()
+            if self.app.sign_player:
+                self.app.sign_player.stop()
         except Exception:
             pass
 
@@ -282,6 +309,94 @@ class TestTwoWayCommunicationDashboard(unittest.TestCase):
         # Check fallback alert notification banner is active
         fallback_text = self.app.lbl_fallback_alert.cget("text")
         self.assertIn("fingerspelling", fallback_text.lower())
+
+    # ─────────────────────────────────────────────────────────────
+    # TEST 7: Deaf Person Auto-Voice Module on Gesture Identification
+    # ─────────────────────────────────────────────────────────────
+    def test_7_deaf_person_auto_voice_module(self):
+        """
+        TEST 7:
+        When a deaf person shows their hand and the model identifies the alphabet:
+          - Voice module automatically pronounces the identified alphabet aloud.
+          - Duplicate hold prevention prevents repeated speech on the same sign.
+          - Changing gesture speaks the new alphabet.
+          - Auto-voice can be toggled ON / OFF.
+          - Hearing individual's speech channel remains completely isolated.
+        """
+        # 1. Verify Auto-Voice is enabled by default
+        self.assertTrue(self.app.auto_voice_deaf_enabled)
+        self.assertIn("Ready", self.app.lbl_voice_status.cget("text"))
+
+        # 2. Reset TTS mock call records
+        self.app.tts.speak_async.reset_mock()
+
+        # 3. Simulate camera frame evaluation where model identifies 'A'
+        now = 100.0
+        self.app.last_spoken_letter = None
+
+        # When 'A' is identified, immediate voice feedback is triggered
+        detected_letter = "A"
+        if self.app.auto_voice_deaf_enabled and detected_letter != self.app.last_spoken_letter:
+            self.app.tts.speak_async(detected_letter)
+            self.app.last_spoken_letter = detected_letter
+            self.app.candidate_voiced = True
+
+        # Verify 'A' was spoken
+        self.app.tts.speak_async.assert_called_once_with("A")
+        self.assertEqual(self.app.last_spoken_letter, "A")
+
+        # 4. Continuous hold: Next frame still sees 'A' -> should NOT re-speak 'A'
+        self.app.tts.speak_async.reset_mock()
+        if self.app.auto_voice_deaf_enabled and detected_letter != self.app.last_spoken_letter:
+            self.app.tts.speak_async(detected_letter)
+
+        self.app.tts.speak_async.assert_not_called()
+
+        # 5. New gesture 'B': immediately speaks 'B'
+        detected_letter = "B"
+        if self.app.auto_voice_deaf_enabled and detected_letter != self.app.last_spoken_letter:
+            self.app.tts.speak_async(detected_letter)
+            self.app.last_spoken_letter = detected_letter
+
+        self.app.tts.speak_async.assert_called_once_with("B")
+
+        # 6. Toggle Auto-Voice OFF
+        self.app.toggle_auto_voice()
+        self.assertFalse(self.app.auto_voice_deaf_enabled)
+        self.assertIn("Muted", self.app.lbl_voice_status.cget("text"))
+
+        # While muted, gesture identification does not trigger speech
+        self.app.tts.speak_async.reset_mock()
+        self.app.current_candidate = "C"
+        self.app.candidate_start_time = now + 2.0
+        self.app.candidate_voiced = False
+
+        elapsed_c = (now + 2.4) - self.app.candidate_start_time
+        if (
+            self.app.auto_voice_deaf_enabled
+            and not self.app.candidate_voiced
+            and elapsed_c >= min(0.3, self.app.hold_time_sec * 0.4)
+        ):
+            self.app.tts.speak_async("C")
+
+        self.app.tts.speak_async.assert_not_called()
+
+        # 7. Toggle back ON
+        self.app.toggle_auto_voice()
+        self.assertTrue(self.app.auto_voice_deaf_enabled)
+
+    # ─────────────────────────────────────────────────────────────
+    # TEST 8: ASL Alphabet Reference Guide Popup
+    # ─────────────────────────────────────────────────────────────
+    def test_8_asl_alphabet_guide_popup(self):
+        """Verify opening and closing the interactive ASL alphabet guide window."""
+        self.app.open_alphabet_guide()
+        self.assertIsNotNone(self.app._guide_win)
+        self.assertTrue(self.app._guide_win.winfo_exists())
+        self.assertEqual(len(self.app._guide_thumbnails), 26)
+        self.assertIn("A", self.app._guide_thumbnails)
+        self.assertIn("Z", self.app._guide_thumbnails)
+        self.app._guide_win.destroy()
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 {
-  "timestamp": "2026-11-05T23:52:56.007022",
+  "timestamp": "2026-11-09T14:53:05.937757",
   "winning_model_type": "RandomForest",
   "selection_reason": "Only Random Forest model was trained.",
   "model_file": "best_model_rf.joblib",
-  "framework": "scikit-learn"
+  "framework": "scikit-learn (ExtraTreesClassifier)"
 }

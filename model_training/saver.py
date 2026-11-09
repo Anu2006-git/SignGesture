@@ -103,7 +103,7 @@ class ModelArtifactSaver:
             best_model_path = self.models_dir / "best_model_rf.joblib"
             joblib.dump(rf_model, str(best_model_path))
             manifest["model_file"] = "best_model_rf.joblib"
-            manifest["framework"] = "scikit-learn"
+            manifest["framework"] = f"scikit-learn ({type(rf_model).__name__})"
         else:
             best_model_path = self.models_dir / "best_model_manifest.json"
 

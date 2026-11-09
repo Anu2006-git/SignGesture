@@ -60,7 +60,7 @@ class TestTwoWayCommunicationWorkflow(unittest.TestCase):
         # Create fresh communication system instance with mock camera to prevent hardware access
         with patch("cv2.VideoCapture") as mock_cap:
             mock_cap.return_value.isOpened.return_value = False
-            self.system = TwoWaySignCommunicationSystem(camera_id=0)
+            self.system = TwoWaySignCommunicationSystem(camera_id=0, hold_time_sec=1.0)
 
     # ─────────────────────────────────────────────────────────────
     # TEST CASE 1: Deaf User Signs -> Predict -> Accumulate -> Confirm -> TTS
@@ -356,6 +356,54 @@ class TestTwoWayCommunicationWorkflow(unittest.TestCase):
         self.system.sign_player.replay()
         self.assertEqual(self.system.sign_player.current_index, 0)
         self.assertEqual(self.system.right_sentence, "THANK")
+
+    # ─────────────────────────────────────────────────────────────
+    # TEST CASE 6: Deaf Person Voice Module in Dual-Panel System
+    # ─────────────────────────────────────────────────────────────
+    def test_case_6_deaf_person_voice_module_accumulator(self):
+        """
+        Verifies that step_gesture_accumulator triggers automatic voice readout
+        for identified sign alphabets, prevents duplicate speech during hold,
+        and allows toggling auto-voice off/on.
+        """
+        self.system.auto_voice_deaf_enabled = True
+        self.system.current_candidate = None
+        self.system.candidate_voiced = False
+
+        with patch.object(self.system.tts, "speak_async", return_value=True) as mock_speak:
+            t = 1000.0
+
+            # 1. Start gesture 'A' -> Immediate voice feedback upon recognition!
+            self.system.step_gesture_accumulator("A", is_wrong_gesture=False, now=t)
+            mock_speak.assert_called_once_with("A")
+            self.assertTrue(self.system.candidate_voiced)
+
+            # 2. Hold 'A' further -> No duplicate speech during continuous hold!
+            mock_speak.reset_mock()
+            self.system.step_gesture_accumulator("A", is_wrong_gesture=False, now=t + 0.35)
+            mock_speak.assert_not_called()
+
+            # 3. Hold 'A' further to 0.60s -> Still no duplicate speech!
+            self.system.step_gesture_accumulator("A", is_wrong_gesture=False, now=t + 0.60)
+            mock_speak.assert_not_called()
+
+            # 4. Hold 'A' to commit at 1.05s -> Committed to sentence, no duplicate speech
+            _, typed = self.system.step_gesture_accumulator("A", is_wrong_gesture=False, now=t + 1.05)
+            self.assertTrue(typed)
+            mock_speak.assert_not_called()
+
+            # 5. Transition to 'B': immediately speaks 'B'!
+            t2 = t + 2.0
+            self.system.step_gesture_accumulator("B", is_wrong_gesture=False, now=t2)
+            mock_speak.assert_called_once_with("B")
+
+            # 6. Disable auto-voice: no speech when gesturing 'C'
+            mock_speak.reset_mock()
+            self.system.auto_voice_deaf_enabled = False
+            t3 = t + 4.0
+            self.system.step_gesture_accumulator("C", is_wrong_gesture=False, now=t3)
+            self.system.step_gesture_accumulator("C", is_wrong_gesture=False, now=t3 + 0.35)
+            mock_speak.assert_not_called()
 
 
 if __name__ == "__main__":

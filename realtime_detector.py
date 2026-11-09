@@ -10,7 +10,7 @@ Two-Way Real-Time Communication System:
       * Robust error display for mic, speech engine, and video assets
   - RIGHT PANEL: Deaf Person -> Spoken English & Text (Stage 4)
       * Real-time MediaPipe hand landmark tracking
-      * 88-dimensional isotropic Random Forest classifier (99.73% test acc)
+      * 88-dimensional isotropic ExtraTrees / Random Forest classifier
       * Real-time Wrong Hand Gesture rejection (Red skeleton & warning badge)
       * Debounced hold debouncer preventing runaway duplicate letter accumulation
       * Sentence accumulator with confirmation & Text-to-Speech (TTS) voice readout
@@ -25,6 +25,7 @@ from collections import Counter, deque
 import json
 import logging
 from pathlib import Path
+import queue
 import sys
 import threading
 import time
@@ -51,7 +52,14 @@ except ImportError:
     _MP_AVAILABLE = False
     mp = None
 
-# Text-to-Speech (TTS)
+# Text-to-Speech (SAPI / pyttsx3)
+try:
+    import pythoncom
+    import win32com.client
+    _SAPI_AVAILABLE = True
+except ImportError:
+    _SAPI_AVAILABLE = False
+
 try:
     import pyttsx3
     _TTS_AVAILABLE = True
@@ -76,32 +84,110 @@ logger = logging.getLogger("realtime_detector")
 
 
 class TextToSpeechEngine:
-    """Threaded Text-to-Speech engine so audio never freezes UI frames."""
+    """
+    Threaded, non-blocking Text-to-Speech engine ensuring audio never freezes UI frames.
+    Uses native Windows SAPI COM voice dispatch (with thread CoInitialize) to prevent SAPI5 event-loop deadlocks,
+    with automatic pyttsx3 fallback for cross-platform compatibility.
+    """
 
-    def __init__(self):
-        self.available = _TTS_AVAILABLE
+    def __init__(self, rate: int = 160, volume: float = 1.0):
+        self.available = _SAPI_AVAILABLE or _TTS_AVAILABLE
+        self.rate = rate
+        self.volume = volume
         self.last_spoken_text = ""
+        self._queue = queue.Queue(maxsize=32)
+        self._worker_thread = None
+        if self.available:
+            self._start_worker()
 
-    def speak_async(self, text: str) -> bool:
-        if not text.strip():
+    def _start_worker(self):
+        self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self._worker_thread.start()
+
+    def _worker_loop(self):
+        # Prefer direct Windows SAPI.SpVoice with thread CoInitialize (zero deadlock, reliable continuous speech)
+        if _SAPI_AVAILABLE:
+            try:
+                pythoncom.CoInitialize()
+                voice = win32com.client.Dispatch("Sapi.SpVoice")
+                sapi_rate = max(-10, min(10, int((self.rate - 150) / 15)))
+                voice.Rate = sapi_rate
+                voice.Volume = int(max(0.0, min(1.0, self.volume)) * 100)
+
+                while True:
+                    item = self._queue.get()
+                    if item is None:
+                        break
+                    text, interrupt = item
+                    try:
+                        self.last_spoken_text = text
+                        if interrupt:
+                            voice.Speak("", 2)  # SVSFPurgeBeforeSpeak
+                        voice.Speak(str(text), 0)  # SVSFDefault (synchronous inside worker thread; does not block UI)
+                    except Exception as e:
+                        logger.warning("SAPI voice speak error: %s", e)
+                    finally:
+                        self._queue.task_done()
+                pythoncom.CoUninitialize()
+                return
+            except Exception as e:
+                logger.warning("Native SAPI init failed, falling back to pyttsx3: %s", e)
+
+        # Fallback for non-Windows or if SAPI init failed
+        if _TTS_AVAILABLE:
+            engine = None
+            try:
+                engine = pyttsx3.init()
+                engine.setProperty("rate", self.rate)
+                engine.setProperty("volume", self.volume)
+            except Exception as e:
+                logger.warning("TTS speech engine init error: %s", e)
+                return
+
+            while True:
+                item = self._queue.get()
+                if item is None:
+                    break
+                text, interrupt = item
+                try:
+                    self.last_spoken_text = text
+                    engine.say(str(text))
+                    engine.runAndWait()
+                except Exception as e:
+                    logger.warning("TTS error: %s", e)
+                    try:
+                        engine = pyttsx3.init()
+                        engine.setProperty("rate", self.rate)
+                        engine.setProperty("volume", self.volume)
+                    except Exception:
+                        pass
+                finally:
+                    self._queue.task_done()
+
+    def speak_async(self, text: str, interrupt: bool = False) -> bool:
+        clean = str(text).strip()
+        if not clean:
             return False
 
-        self.last_spoken_text = text.strip()
-        print(f"🔊 Spoken sentence: \"{text.strip()}\"")
+        self.last_spoken_text = clean
+        print(f"🔊 Spoken for deaf user: \"{clean}\"")
 
         if not self.available:
             return True
 
-        def _speak():
-            try:
-                engine = pyttsx3.init()
-                engine.setProperty("rate", 160)
-                engine.say(text)
-                engine.runAndWait()
-            except Exception as e:
-                logger.warning("TTS error: %s", e)
+        if interrupt:
+            with self._queue.mutex:
+                self._queue.queue.clear()
 
-        threading.Thread(target=_speak, daemon=True).start()
+        # Prevent queue overflow while preserving recent letters
+        if self._queue.qsize() > 6 and not interrupt:
+            try:
+                self._queue.get_nowait()
+                self._queue.task_done()
+            except queue.Empty:
+                pass
+
+        self._queue.put((clean, interrupt))
         return True
 
 
@@ -116,9 +202,9 @@ class TwoWaySignCommunicationSystem:
         self,
         camera_id: int = 0,
         mic_index: Optional[int] = None,
-        hold_time_sec: float = 1.0,
-        confidence_threshold: float = 0.60,
-        min_margin: float = 0.08,
+        hold_time_sec: float = 0.70,
+        confidence_threshold: float = 0.35,
+        min_margin: float = 0.02,
         initial_text: Optional[str] = None,
     ):
         self.camera_id = camera_id
@@ -160,6 +246,11 @@ class TwoWaySignCommunicationSystem:
         self.candidate_start_time = 0.0
         self.candidate_committed = False   # Debounce lock preventing runaway duplicate letters
         self.last_added_time = 0.0
+
+        # Voice module for deaf individual (Sign ➔ Voice)
+        self.auto_voice_deaf_enabled = True
+        self.candidate_voiced = False
+        self.last_spoken_letter = None
 
         # MediaPipe setup
         self.mp_hands = None
@@ -271,7 +362,7 @@ class TwoWaySignCommunicationSystem:
 
     def step_gesture_accumulator(self, detected_letter: Optional[str], is_wrong_gesture: bool, now: float) -> Tuple[float, bool]:
         """
-        Processes letter debounce timer with duplicate prevention.
+        Processes letter debounce timer with duplicate prevention and voice readout for deaf user.
         Returns: (progress_ratio, letter_typed_bool)
         """
         progress_ratio = 0.0
@@ -293,11 +384,21 @@ class TwoWaySignCommunicationSystem:
                 self.current_candidate = detected_letter
                 self.candidate_start_time = now
                 self.candidate_committed = False
+                self.candidate_voiced = False
+
+            # 🔊 Immediate Voice Feedback for every alphabet A-Z!
+            if self.auto_voice_deaf_enabled and detected_letter != self.last_spoken_letter:
+                self.tts.speak_async(detected_letter)
+                self.last_spoken_letter = detected_letter
+                self.candidate_voiced = True
         else:
             # Hand removed or wrong gesture shown: reset lock and timer
             self.current_candidate = None
             self.candidate_start_time = 0.0
             self.candidate_committed = False
+            self.candidate_voiced = False
+            if detected_letter is None or is_wrong_gesture:
+                self.last_spoken_letter = None
 
         return progress_ratio, typed_now
 
@@ -494,18 +595,21 @@ class TwoWaySignCommunicationSystem:
                 else:
                     self.prediction_buffer.append(None)
 
-                # Majority voting
+                # Majority voting - prioritize valid signs across all 26 alphabets A-Z
                 active_preds = [p for p in self.prediction_buffer if p is not None]
                 detected_letter = None
                 is_wrong_gesture = False
                 confidence = last_eval["confidence"] if last_eval else 0.0
 
-                if active_preds:
-                    most_common, count = Counter(active_preds).most_common(1)[0]
-                    if most_common == "WRONG_GESTURE" and count >= 2:
+                valid_preds = [p for p in active_preds if p != "WRONG_GESTURE"]
+                if valid_preds:
+                    most_common_letter, l_count = Counter(valid_preds).most_common(1)[0]
+                    if l_count >= 2 or (len(valid_preds) == 1 and confidence >= 0.35):
+                        detected_letter = most_common_letter
+                        is_wrong_gesture = False
+                elif active_preds:
+                    if sum(1 for p in active_preds if p == "WRONG_GESTURE") >= 4:
                         is_wrong_gesture = True
-                    elif most_common != "WRONG_GESTURE" and count >= 3:
-                        detected_letter = most_common
 
                 # Debounced gesture accumulation
                 progress_ratio, _ = self.step_gesture_accumulator(detected_letter, is_wrong_gesture, now)
@@ -543,9 +647,15 @@ class TwoWaySignCommunicationSystem:
                     cv2.rectangle(view_cam, (bar_x, bar_y), (bar_x + fill_w, bar_y + bar_h), (0, 255, 0), -1)
                     cv2.rectangle(view_cam, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (120, 120, 120), 1)
 
-                    pct_txt = "TYPED!" if self.candidate_committed else f"Hold {int(progress_ratio*100)}%"
+                    pct_txt = "TYPED!" if self.candidate_committed else (f"SPOKE '{detected_letter}'" if self.candidate_voiced else f"Hold {int(progress_ratio*100)}%")
                     cv2.putText(view_cam, pct_txt, (bar_x + bar_w + 10, bar_y + 15),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 255, 0), 1, cv2.LINE_AA)
+
+                    voice_stat = f"Voice: '{self.last_spoken_letter}'" if self.last_spoken_letter else "Voice: ACTIVE"
+                    if not self.auto_voice_deaf_enabled:
+                        voice_stat = "Voice: MUTED"
+                    cv2.putText(view_cam, voice_stat, (bar_x, bar_y + 36),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 220, 255) if self.auto_voice_deaf_enabled else (120, 120, 120), 1, cv2.LINE_AA)
 
                 else:
                     cv2.putText(view_cam, "Letter: [Hold hand in frame]", (18, 42),
@@ -573,8 +683,8 @@ class TwoWaySignCommunicationSystem:
             # Right Panel Bottom Controls
             cv2.rectangle(right_panel, (0, panel_h - 75), (panel_w, panel_h), (18, 22, 18), -1)
             cv2.line(right_panel, (0, panel_h - 75), (panel_w, panel_h - 75), (0, 220, 140), 1)
-            cv2.putText(right_panel, "[Hold 1.0s] Type  |  [S] Voice TTS  |  [SPACE] Space  |  [BACKSPACE] Del",
-                        (20, panel_h - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 160), 1, cv2.LINE_AA)
+            cv2.putText(right_panel, "[Hold 1.0s] Type  |  [S] Voice Sentence  |  [V] Toggle Voice  |  [SPACE] Space",
+                        (20, panel_h - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 255, 160), 1, cv2.LINE_AA)
             cv2.putText(right_panel, f"Sensitivity: Min Conf {self.confidence_threshold*100:.0f}%  (Press [-] / [+] to adjust)",
                         (20, panel_h - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (140, 160, 140), 1, cv2.LINE_AA)
 
@@ -641,6 +751,10 @@ class TwoWaySignCommunicationSystem:
                 elif key in (ord('s'), ord('S')):  # Speak Right Sentence aloud
                     if self.right_sentence.strip():
                         self.tts.speak_async(self.right_sentence)
+                elif key in (ord('v'), ord('V')):  # Toggle Deaf Auto-Voice ON/OFF
+                    self.auto_voice_deaf_enabled = not self.auto_voice_deaf_enabled
+                    st = "ENABLED" if self.auto_voice_deaf_enabled else "MUTED"
+                    print(f"🔊 Deaf Auto-Voice {st}")
                 elif key in (ord('+'), ord('='), ord(']')):  # Sensitivity +
                     self.confidence_threshold = min(0.95, round(self.confidence_threshold + 0.05, 2))
                     print(f"🎯 Sensitivity increased: Min Conf {self.confidence_threshold*100:.0f}%")
@@ -665,9 +779,9 @@ def parse_args():
     )
     p.add_argument("--camera", type=int, default=0, help="Webcam device index (default: 0)")
     p.add_argument("--mic", type=int, default=None, help="Microphone device index (default: system default)")
-    p.add_argument("--hold-time", type=float, default=1.0, help="Hold duration in seconds to type a letter (default: 1.0)")
-    p.add_argument("--confidence", type=float, default=0.60, help="Minimum confidence threshold (default: 0.60)")
-    p.add_argument("--margin", type=float, default=0.08, help="Minimum probability margin (default: 0.08)")
+    p.add_argument("--hold-time", type=float, default=0.70, help="Hold duration in seconds to type a letter (default: 0.70)")
+    p.add_argument("--confidence", type=float, default=0.35, help="Minimum confidence threshold (default: 0.35)")
+    p.add_argument("--margin", type=float, default=0.02, help="Minimum probability margin (default: 0.02)")
     p.add_argument("--text", type=str, default=None, help="Initial text sentence to translate and play on launch")
     p.add_argument("--cli", action="store_true", help="Run in classic OpenCV dual-panel mode instead of 3-section dashboard")
     return p.parse_args()
