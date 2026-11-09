@@ -1,12 +1,18 @@
 <div align="center">
 
-# 🤟 SignGesture AI
+<img src="assets/signgesture_3d_banner.gif" alt="SignGesture AI 3D Motion Banner" width="100%" style="border-radius: 12px; margin-bottom: 8px;" />
+
+<br/>
+
+<a href="#readme">
+  <img src="assets/hand_gesture_3d_logo.gif" width="95" height="95" alt="SignGesture 3D Motion Hand Logo" />
+</a>
+
+# **SignGesture AI**
 ### **Next-Generation Assistive Two-Way Communication Dashboard**
 *Real-Time American Sign Language (ASL) Vision Bridge & Bidirectional Speech Synthesis*
 
-<p align="center">
-  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=22&duration=2800&pause=1200&color=0D9488&center=true&vcenter=true&width=780&lines=🤟+99.51%25+Accurate+ASL+Alphabet+Vision+Core+(A-Z);⚡+Ultra-Low+Latency+(~9ms)+CPU+Inference;🔊+Zero-Deadlock+Continuous+SAPI+Voice+Feedback;🌐+Simultaneous+Bidirectional+Deaf-Hearing+Bridge;📖+Interactive+In-App+ASL+Alphabet+Reference+Guide" alt="SignGesture Features Typing SVG" />
-</p>
+<br/>
 
 [![Python 3.11](https://img.shields.io/badge/Python-3.11.9-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Model Accuracy](https://img.shields.io/badge/ExtraTrees_Accuracy-99.51%25-0D9488?style=for-the-badge&logo=scikit-learn&logoColor=white)](models/evaluation/evaluation_report.txt)
